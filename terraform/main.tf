@@ -47,6 +47,15 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
 }
 
 # --------------------------
+# Lambda Function Package
+# --------------------------
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_file = "${path.module}/../lambda_function.py"
+  output_path = "${path.module}/lambda_function.zip"
+}
+
+# --------------------------
 # Lambda Function
 # --------------------------
 resource "aws_lambda_function" "trigger_mlops" {
@@ -56,7 +65,8 @@ resource "aws_lambda_function" "trigger_mlops" {
   runtime       = "python3.12"
   timeout       = 30
 
-  filename = "lambda.zip"
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
