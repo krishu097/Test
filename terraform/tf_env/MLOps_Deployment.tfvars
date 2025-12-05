@@ -1,0 +1,5 @@
+aws_region             = "us-east-2"
+github_repo_owner      = "krishu097"
+github_repo            = "MLOPS-POC"
+training_data_bucket   = "poc-mlops-bucket-gmk"
+training_data_prefix   = "training-data/"

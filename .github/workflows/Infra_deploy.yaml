@@ -1,0 +1,104 @@
+name: Terraform Deployment Module
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      Terraform_Backend_Configuration_File:
+        required: true
+        type: string
+      Terraform_Deployment_Configuration_File:
+        required: true
+        type: string
+      WORKING_DIR:
+        required: true
+        type: string
+      Action:
+        required: false
+        type: string
+        default: "apply"
+        description: "Terraform action to perform (apply or destroy)"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  plan-and-apply-deployment:
+    name: "Terraform Init, Validate, Plan, Upload State, Apply/Destroy"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    container:
+      image: hashicorp/terraform:1.5.0
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/${{ inputs.WORKING_DIR }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOYMENT_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Action Type
+        id: check_action
+        run: |
+          if [ "${{ inputs.Action }}" = "destroy" ]; then
+            echo "action=destroy" >> $GITHUB_OUTPUT
+          else
+            echo "action=apply" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Terraform Init (with backend config)
+        run: |
+          rm -rf .terraform
+          terraform init -backend-config=../${{ inputs.Terraform_Backend_Configuration_File }}
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan for Apply
+        if: steps.check_action.outputs.action == 'apply'
+        run: |
+          export TF_LOG=INFO
+          terraform plan -out terraform.plan -input=false -lock=false -var-file ../${{ inputs.Terraform_Deployment_Configuration_File }}
+
+      - name: Terraform Plan for Destroy
+        if: steps.check_action.outputs.action == 'destroy'
+        run: |
+          export TF_LOG=INFO
+          terraform plan -destroy -out terraform.plan -input=false -lock=false -var-file ../${{ inputs.Terraform_Deployment_Configuration_File }}
+
+      - name: Store plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform.plan
+
+      - name: Terraform Apply or Destroy
+        run: |
+          if [ "${{ inputs.Action }}" = "destroy" ]; then
+            echo "Performing Terraform Destroy..."
+            terraform apply -auto-approve terraform.plan
+          else
+            echo "Performing Terraform Apply..."
+            terraform apply -auto-approve terraform.plan
+            terraform show -json > terraform_state.json
+          fi
+
+      - name: Upload Terraform state JSON (for apply only)
+        if: steps.check_action.outputs.action == 'apply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state
+          path: terraform_state.json
+
+      

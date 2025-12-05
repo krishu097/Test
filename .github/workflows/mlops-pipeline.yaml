@@ -1,0 +1,125 @@
+name: MLOps Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_reason:
+        description: 'Reason for triggering training'
+        required: false
+        default: 'Manual trigger'
+      s3_bucket:
+        description: 'S3 bucket name'
+        required: false
+        default: 'poc-mlops-bucket-gmk'
+      s3_key:
+        description: 'S3 object key'
+        required: false
+        default: 'training-data/data.csv'
+
+env:
+  AWS_REGION: us-east-2
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      model-uri: ${{ steps.training.outputs.model-uri }}
+      accuracy: ${{ steps.training.outputs.accuracy }}
+      f1-score: ${{ steps.training.outputs.f1-score }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOYMENT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          pip install boto3 sagemaker pandas scikit-learn joblib numpy
+      
+      - name: Download training data from S3
+        run: |
+          # Use S3 bucket and key from Lambda trigger or defaults
+          S3_BUCKET="${{ github.event.inputs.s3_bucket || 'poc-mlops-bucket-gmk' }}"
+          S3_KEY="${{ github.event.inputs.s3_key || 'training-data/data.csv' }}"
+          aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" data.csv
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+      
+      - name: Train Model
+        id: training
+        run: |
+          python code/train.py --data-file data.csv --output-dir ./model
+          
+          # Extract metrics for outputs
+          ACCURACY=$(python -c "import json; print(json.load(open('./model/metrics.json'))['accuracy'])")
+          F1_SCORE=$(python -c "import json; print(json.load(open('./model/metrics.json'))['f1_score'])")
+          
+          echo "accuracy=$ACCURACY" >> $GITHUB_OUTPUT
+          echo "f1-score=$F1_SCORE" >> $GITHUB_OUTPUT
+          echo "model-uri=./model/model.pkl" >> $GITHUB_OUTPUT
+        
+      - name: Get ECR Repository URL
+        id: ecr
+        run: |
+          ECR_URL=$(aws ecr describe-repositories --repository-names mlops-loan-prediction --query 'repositories[0].repositoryUri' --output text)
+          echo "ecr-url=$ECR_URL" >> $GITHUB_OUTPUT
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+      
+      - name: Build and Push Docker Image
+        run: |
+          # Get ECR login
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr.outputs.ecr-url }}
+          
+          # Build image with trained model
+          docker build -t mlops-model:v${{ github.run_number }} .
+          docker tag mlops-model:v${{ github.run_number }} ${{ steps.ecr.outputs.ecr-url }}:v${{ github.run_number }}
+          
+          # Push to ECR
+          docker push ${{ steps.ecr.outputs.ecr-url }}:v${{ github.run_number }}
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+
+  deploy:
+    needs: train
+    if: needs.train.outputs.accuracy >= '0.7' && needs.train.outputs.f1-score >= '0.7'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOYMENT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          pip install boto3 sagemaker
+      
+      - name: Deploy Model
+        run: |
+          python .github/workflows/deploy_model.py
+        env:
+          MODEL_URI: ${{ needs.train.outputs.model-uri }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}

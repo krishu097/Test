@@ -1,0 +1,33 @@
+name: Deploy uat edfx AWS Account
+
+on:
+  workflow_dispatch:
+    inputs:
+      Action:
+        description: "Select Terraform Action"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+        default: apply
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  plan-and-apply-dev:
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
+    uses: ./.github/workflows/Infra_deploy.yaml
+    with:
+      environment: uat-edfx
+      WORKING_DIR: terraform
+      Terraform_Backend_Configuration_File: tf_env/Backend_Uat_Config_Ohio.config
+      Terraform_Deployment_Configuration_File: tf_env/MLOps_Deployment.tfvars
+      Action: ${{ github.event.inputs.Action }}
+    secrets: inherit
+
