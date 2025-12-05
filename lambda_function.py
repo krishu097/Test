@@ -12,10 +12,16 @@ def lambda_handler(event, context):
     # Trigger GitHub workflow
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/mlops-pipeline.yaml/dispatches"
 
+    # Extract S3 info from event
+    record = event["Records"][0]
+    bucket = record["s3"]["bucket"]["name"]
+    key = record["s3"]["object"]["key"]
+    
     data = json.dumps({
         "ref": "main",
         "inputs": {
-            "trigger_source": "s3_upload"
+            "s3_bucket": bucket,
+            "s3_key": key
         }
     }).encode("utf-8")
 
