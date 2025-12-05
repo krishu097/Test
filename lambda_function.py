@@ -10,7 +10,7 @@ def lambda_handler(event, context):
     GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 
     # Trigger GitHub workflow
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/main.yml/dispatches"
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/mlops-pipeline.yaml/dispatches"
 
     data = json.dumps({
         "ref": "main",
