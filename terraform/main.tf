@@ -72,7 +72,7 @@ resource "aws_lambda_function" "trigger_mlops" {
     variables = {
       GITHUB_REPO       = "MLOPS-POC"
       GITHUB_REPO_OWNER = "krishu097"
-      GITHUB_TOKEN      = data.aws_secretsmanager_secret_version.github_token.secret_string
+      GITHUB_TOKEN      = jsondecode(data.aws_secretsmanager_secret_version.github_token.secret_string)["dr-github-token"]
     }
   }
 }
