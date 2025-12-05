@@ -26,8 +26,8 @@ jobs:
     with:
       environment: uat-edfx
       WORKING_DIR: terraform
-      Terraform_Backend_Configuration_File: tf_env/Backend_Uat_Config_Ohio.config
-      Terraform_Deployment_Configuration_File: tf_env/MLOps_Deployment.tfvars
+      Terraform_Backend_Configuration_File: terraform/tf_env/Backend_Uat_Config_Ohio.config
+      Terraform_Deployment_Configuration_File: terraform/tf_env/MLOps_Deployment.tfvars
       Action: ${{ github.event.inputs.Action }}
     secrets: inherit
 
