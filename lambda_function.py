@@ -1,53 +1,34 @@
 import json
 import os
-import urllib3
-
-http = urllib3.PoolManager()
-
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-OWNER = os.getenv("GITHUB_REPO_OWNER")
-REPO = os.getenv("GITHUB_REPO")
+import urllib.request
 
 def lambda_handler(event, context):
-    print("Event:", event)
+    print("Event:", json.dumps(event))
 
-    record = event["Records"][0]
-    bucket = record["s3"]["bucket"]["name"]
-    key    = record["s3"]["object"]["key"]
+    GITHUB_OWNER = os.environ["GITHUB_REPO_OWNER"]
+    GITHUB_REPO = os.environ["GITHUB_REPO"]
+    GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 
-    if not key.endswith(".csv"):
-        return {"msg": "Ignored non-CSV file", "file": key}
+    # Trigger GitHub workflow
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/actions/workflows/main.yml/dispatches"
 
-    print(f"CSV uploaded: s3://{bucket}/{key}")
-    print(f"Triggering GitHub workflow for repo {OWNER}/{REPO}")
-
-    url = f"https://api.github.com/repos/{OWNER}/{REPO}/actions/workflows/mlops-pipeline.yaml/dispatches"
-
-    body = {
+    data = json.dumps({
         "ref": "main",
         "inputs": {
-            "s3_bucket": bucket,
-            "s3_key": key
+            "trigger_source": "s3_upload"
         }
-    }
+    }).encode("utf-8")
 
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "User-Agent": "lambda-mlops-trigger",
-        "Accept": "application/vnd.github+json"
-    }
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"token {GITHUB_TOKEN}")
+    req.add_header("Content-Type", "application/json")
 
-    response = http.request(
-        "POST",
-        url,
-        headers=headers,
-        body=json.dumps(body)
-    )
+    try:
+        response = urllib.request.urlopen(req)
+        print("GitHub API status:", response.status)
+        return {"statusCode": 200, "body": "Workflow triggered"}
 
-    print("GitHub API status:", response.status)
-
-    return {
-        "status": "success",
-        "github_response": response.status
-    }
-
+    except Exception as e:
+        print("Error triggering workflow:", str(e))
+        return {"statusCode": 500, "body": "Failed to trigger workflow"}
